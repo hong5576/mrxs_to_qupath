@@ -55,12 +55,12 @@ for f in input_files:
 
 try:
     processed_imgs = []
-    
+
     print("\n🚀 开始处理 (使用 Max Intensity 模式)...")
-    
+
     for f in input_files:
         img = pyvips.Image.new_from_file(f, access="sequential")
-        
+
         # --- 核心修改 V7 (最稳妥的写法) ---
         if img.bands > 1:
             # 1. 拆分成单通道列表: [Band0, Band1, Band2]
@@ -68,12 +68,10 @@ try:
             # 2. 用第1个通道发起比较，参数是[剩余通道]，index=-1表示取最大值
             img = split_bands[0].bandrank(split_bands[1:], index=-1)
         # --------------------------------
-        
-        if img.format != 'uchar':
-             img = img.cast("uchar")
 
+        # 移除强制 uchar 转换，保留原始数据格式（如 float 0-1）
         processed_imgs.append(img)
-    
+
     # 尺寸检查
     base = processed_imgs[0]
     if any(i.width != base.width or i.height != base.height for i in processed_imgs):
@@ -84,8 +82,21 @@ try:
     merged = base.bandjoin(processed_imgs[1:])
     merged = merged.copy(interpretation="multiband")
 
+    # Determine correct pixel type for XML
+    vips_format_map = {
+        'uchar': 'uint8',
+        'char': 'int8',
+        'ushort': 'uint16',
+        'short': 'int16',
+        'uint': 'uint32',
+        'int': 'int32',
+        'float': 'float',
+        'double': 'double'
+    }
+    ome_pixel_type = vips_format_map.get(merged.format, "uint8")
+
     # 注入元数据
-    xml_data = generate_ome_xml(merged.width, merged.height, channels_info, "uint8")
+    xml_data = generate_ome_xml(merged.width, merged.height, channels_info, ome_pixel_type)
     merged.set_type(pyvips.GValue.gstr_type, "image-description", xml_data)
 
     # 保存
@@ -94,7 +105,7 @@ try:
         OUTPUT_FILENAME,
         compression="lzw",
         tile=True, tile_width=512, tile_height=512,
-        pyramid=True, bigtiff=True
+        pyramid=True, bigtiff=True, subifd=True
     )
 
     print("\n" + "="*40)
